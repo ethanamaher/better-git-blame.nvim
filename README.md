@@ -1,13 +1,39 @@
 # better-git-blame
-a lazy nvim plugin created to add more functionality to a git blame by gathering all commits that changed the selected lines and allowing the user to see the diff of those commits
-</br></br>
-takes a heuristic approach where it searches for git commits with changes inbetween the selected lines so really only useful for a shorter history of the code you selected
-</br></br>
-made this for myself so excuse the code </br>
-feel free to use if you want to and can figure out how to add it on your own
-</br>
+a lazy nvim plugin created to add more functionality to a git blame directly within nvim by gathering all commits that changed the selected lines and allowing the user to see the diff of those commits
 
-## Required: </br>
+## Features
+* Analyze Git history (`git log -L`) for lines visually selected
+* Present relevant commits in telescope picker with preview showing changes
+* `<CR>` a commit to open a full diff view of the selected commit (vim-fugitive or diffview.nvim if available)
 
-  telescope </br>
-  plenary </br>
+## Setup
+### Dependencies
+* Neovim 0.9.5+
+* telescope.nvim
+* plenary.nvim
+* **Optional**
+    * vim-fugitive **(highly recommended)**
+    * diffview.nvim
+### Installation
+Add the following to your `lazy.nvim` plugin configuration
+```lua
+return {
+    "ethanamaher/better-git-blame.nvim",
+
+    dependencies = {
+        "nvim-lua-plenary/nvim",
+        "nvim-telescope/telescope.nvim",
+        -- Optional but highly recommended
+        -- "tpope/vim-fugitive"
+        -- "sindrets/diffview.nvim"
+    
+    },
+
+    config = function()
+        require("better-git-blame").setup({
+            -- calling setup alone will setup the BlameInvestigate command used to preview git history
+            -- may add future configuration options
+        })
+    end,
+}
+```
