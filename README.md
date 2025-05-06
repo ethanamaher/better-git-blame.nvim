@@ -9,7 +9,6 @@ open to ideas. may be possible to select git commits in the file that contain po
 * Analyze Git history (`git log -L`) for lines visually selected
 * Present relevant commits in telescope picker with preview showing changes
 * `<CR>` a commit to open a full diff view of the selected commit (vim-fugitive or diffview.nvim if available)
-
 ## Use
 * Visually select lines of code and use `:BlameInvesigate` to search for git commits affecting the line numbers selected
 * Due to this heuristic approach, it may not show to full history of that block, will have to think about the best way to really search through git commits for specific edits to the block of code selected.
