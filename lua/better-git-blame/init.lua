@@ -12,6 +12,7 @@ local previewers = require("telescope.previewers")
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 
+-- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
     local _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
     local _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
@@ -27,7 +28,7 @@ local function get_visual_selection()
         return nil
     end
 
-    -- hand backward selection
+    -- handle backward selection
     if start_row > end_row then
         start_row, end_row = end_row, start_row
     end
@@ -35,16 +36,17 @@ local function get_visual_selection()
     return { file = file_path, start_line = start_row, end_line = end_row }
 end
 
+-- parse output of git log
 local function parse_commit_list(output_lines)
     print("Parsing commits")
     local commits = {}
 
+    -- funky
     local pattern = "^([0-9a-f]+)%s+([%d-]+)%s+(.-)%s+(.*)$"
 
     for _, line in ipairs(output_lines) do
         local hash, date, author, subject = line:match(pattern)
         if hash then
-            print(hash)
             table.insert(commits, {
                 hash = hash,
                 date = date,
@@ -57,7 +59,9 @@ local function parse_commit_list(output_lines)
     return commits
 end
 
+-- function called from BlameInvestigate
 function M.investigate_selection()
+    -- get lines of visual selection
     local selection = get_visual_selection()
     if not selection then
         vim.notify("No selection", vim.log.levels.ERROR, { title="BetterGitBlame" })
@@ -65,18 +69,19 @@ function M.investigate_selection()
     end
 
     local current_path = Path:new(selection.file)
-    local repo_root_cmd = string.format("git -C '%s' rev-parse --show-toplevel", vim.fn.fnameescape(current_path:parent():absolute()))
 
+    -- get root of git repo
+    local repo_root_cmd = string.format("git -C '%s' rev-parse --show-toplevel", vim.fn.fnameescape(current_path:parent():absolute()))
     local repo_root_list = vim.fn.systemlist(repo_root_cmd)
     local repo_root = repo_root_list and repo_root_list[1]
     repo_root = repo_root and vim.trim(repo_root)
+
     if vim.vshell_error ~= nil or not repo_root or repo_root == "" then
         vim.notify("Shell or repo root error: " .. repo_root , vim.log.levels.ERROR, { title="BetterGitBlame" })
         return
     end
 
     local rel_file_path = current_path:make_relative(repo_root)
-
     if not rel_file_path then
         vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
         return
@@ -87,8 +92,8 @@ function M.investigate_selection()
     local date_arg = "--date=short"
     local range_arg = "-L" .. log_range .. ":" .. rel_file_path
 
+    -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
     local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
-
     vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
 
     local job = Job:new({
@@ -96,6 +101,7 @@ function M.investigate_selection()
         args = git_args,
         cwd = repo_root,
         on_exit = vim.schedule_wrap(function(j, return_val)
+            -- return val other than 0, consider error
             if return_val ~= 0 then
                 local stderr = table.concat(j:stderr_result(), "\n")
                 vim.notify("Failed Here".. stderr , vim.log.levels.ERROR, { title="BetterGitBlame"})
@@ -103,12 +109,13 @@ function M.investigate_selection()
             end
 
             local commit_list = parse_commit_list(j:result())
-
+            -- no commit list
             if #commit_list == 0 then
                 vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
                 return
             end
 
+            -- defining preview buffer
             local git_previewer = previewers.new_buffer_previewer {
                 define_preview = function(self, entry, status)
                     if not vim.api.nvim_buf_is_valid(self.state.bufnr) then
@@ -133,6 +140,7 @@ function M.investigate_selection()
                     local commit_hash = entry.value.hash
                     local show_cmd_args = {"show", commit_hash}
 
+                    -- there is surely a a cleaner way to handle buffer output
                     local output_lines = {}
                     local error_lines = {}
                     local job_exit_code = -1
@@ -173,10 +181,11 @@ function M.investigate_selection()
                             vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
                             vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
 
+                            -- write final output and set filetype to git
                             vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, final_content)
                             vim.api.nvim_buf_set_option(self.state.bufnr, "filetype", "git")
 
-
+                            -- set readonly
                             vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
                             vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
 
@@ -190,6 +199,8 @@ function M.investigate_selection()
                 finder = finders.new_table({
                     results = commit_list,
                     entry_maker = function(entry)
+
+                        -- trim hash to first 6 characters
                         local trimmed_hash = string.sub(entry.hash, 1, 7)
 
                         return {
@@ -207,6 +218,7 @@ function M.investigate_selection()
                         preview_width = 0.5,
                     }
                 },
+                -- mappings
                 attach_mappings = function(prompt_bufnr, map)
                     -- local current_picker = action_state.get_current_picker(prompt_bufnr)
 
@@ -218,9 +230,11 @@ function M.investigate_selection()
                             local hash = sel.value.hash
                             local file = sel.filename
 
-                            if vim.fn.exists(":Gvdiffsplit") == 2 then
+                            -- where optional dependencies come in handy
+
+                            if vim.fn.exists(":Gvdiffsplit") == 2 then -- fugitive
                                 vim.cmd("Gvdiffsplit " .. hash)
-                            elseif vim.fn.exists(":DiffviewOpen") == 2 then
+                            elseif vim.fn.exists(":DiffviewOpen") == 2 then --diffview
                                 vim.cmd("DiffviewOpen " .. hash .. ".." .. hash .. " -- " .. file)
                             else
                                 if vim.fn.exists(":Git") == 2 then
@@ -236,10 +250,7 @@ function M.investigate_selection()
                 end
             }):find()
         end)
-    })
-    if job then
-        job:start()
-    end
+    }):start()
 end
 
 
