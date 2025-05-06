@@ -1,14 +1,20 @@
 # better-git-blame
 a lazy nvim plugin created to add more functionality to a git blame directly within nvim by gathering all commits that changed the selected lines and allowing the user to see the diff of those commits
 
+the idea behind this plugin was to offer a better history of a specific block of code, such as a method or class. a drawback of this approach is that the block of code will end up on multiple sets of lines through development as things are added and removed and i have not thought of a workaround for that.
+
+open to ideas. may be possible to select git commits in the file that contain portions of selected text but that does complicate it
+
 ## Features
 * Analyze Git history (`git log -L`) for lines visually selected
 * Present relevant commits in telescope picker with preview showing changes
 * `<CR>` a commit to open a full diff view of the selected commit (vim-fugitive or diffview.nvim if available)
-
+## Use
+* Visually select lines of code and use `:BlameInvesigate` to search for git commits affecting the line numbers selected
+* Due to this heuristic approach, it may not show to full history of that block, will have to think about the best way to really search through git commits for specific edits to the block of code selected.
 ## Setup
 ### Dependencies
-* Neovim 0.9.5+
+* Neovim (developed on v0.10.4)
 * telescope.nvim
 * plenary.nvim
 * **Optional**
@@ -26,7 +32,7 @@ return {
         -- Optional but highly recommended
         -- "tpope/vim-fugitive"
         -- "sindrets/diffview.nvim"
-    
+
     },
 
     config = function()
