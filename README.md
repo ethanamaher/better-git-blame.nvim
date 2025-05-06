@@ -8,7 +8,7 @@ a lazy nvim plugin created to add more functionality to a git blame directly wit
 
 ## Setup
 ### Dependencies
-* Neovim 0.9.5+
+* Neovim (developed on v0.10.4)
 * telescope.nvim
 * plenary.nvim
 * **Optional**
