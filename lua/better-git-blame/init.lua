@@ -20,14 +20,14 @@ local current_state = {
 
 -- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
+    -- add later, if not in visual mode, use current line
     local start_row, end_row
-    -- check for in visual mode
-    local is_visual_mode = vim.fn.mode():find("[vV]")
 
+    local current_mode = vim.fn.mode(true)
+    local is_visual_mode = current_mode:find("[vV]") ~= nil
 
-    -- if in visual mode get selection range
-    -- if not in visual mode use current line
     if is_visual_mode then
+        -- use '< and '> to get visual selection
         _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
         _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
     else
@@ -41,13 +41,11 @@ local function get_visual_selection()
         return nil
     end
 
-    if start_row == 0 or end_row == 0 then
-        if not is_visual_mode then
-            start_row = vim.fn.line(".")
-            end_row = start_row
-        else
-            vim.notify("Could not determine selection range", vim.log.levels.WARN, { title="BetterGitBlame"})
-        end
+    if is_visual_mode and (start_row == 0 or end_row == 0) then
+        vim.notify("Could not determine selection range", vim.log.levels.WARN, { title="BetterGitBlame"})
+        return nil
+    elseif not is_visual_mode and start_row == 0 then
+        return nil
     end
 
     -- handle backward selection
@@ -301,10 +299,26 @@ function M.investigate_selection()
     end)
 end
 
+function M.show_last_investigation()
+    if not current_state.last_selection or not current_state.last_repo_root then
+        vim.notify("Not previous investigation stored.", vim.log.levels.WARN, { title="BetterGitBlame:BlameShowLast" })
+        return
+    end
+
+    if current_state.last_commits then
+        launch_telescope_picker(current_state.last_commits, current_state.last_repo_root, current_state.last_selection)
+        return
+    end
+end
+
 function M.setup()
     vim.api.nvim_create_user_command("BlameInvestigate", M.investigate_selection, {
         range = true,
         desc = "Investigate Git history of selected code block",
+    })
+
+    vim.api.nvim_create_user_command("BlameShowLast", M.show_last_investigation, {
+        desc = "Show telescope picker of last investigation from BlameInvestigate",
     })
 end
 
