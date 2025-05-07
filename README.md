@@ -37,8 +37,7 @@ return {
 
     config = function()
         require("better-git-blame").setup({
-            -- calling setup alone will setup the BlameInvestigate command used to preview git history
-            -- may add future configuration options
+            -- calling setup alone will setup the BlameInvestigate and BlameShowLast commands
         })
     end,
 }
