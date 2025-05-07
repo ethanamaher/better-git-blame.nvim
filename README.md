@@ -11,6 +11,7 @@ open to ideas. may be possible to select git commits in the file that contain po
 * `<CR>` a commit to open a full diff view of the selected commit (vim-fugitive or diffview.nvim if available)
 ## Use
 * Visually select lines of code and use `:BlameInvesigate` to search for git commits affecting the line numbers selected
+* After running `:BlameInvestigate` the last selection information is cached so you can run `:BlameShowLast` to see the commits from the last selection
 * Due to this heuristic approach, it may not show to full history of that block, will have to think about the best way to really search through git commits for specific edits to the block of code selected.
 ## Setup
 ### Dependencies
