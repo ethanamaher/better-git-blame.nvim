@@ -11,7 +11,12 @@ local sorters = require("telescope.sorters")
 local previewers = require("telescope.previewers")
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
-local utils = require("telescope.utils")
+
+local current_state = {
+    last_selection = nil,
+    last_repo_root = nil,
+    last_commit_list = nil,
+}
 
 -- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
@@ -53,21 +58,25 @@ local function get_visual_selection()
     return { file = file_path, start_line = start_row, end_line = end_row }
 end
 
-local function find_git_repo_root(path)
-    local parent_dir = Path:new(path):parent():absolute()
-    local repo_root_cmd = { "git", "-C", parent_dir, "rev-parse", "--show-toplevel" }
-    local root = nil
-    local job_result = vim.fn.systemlist(repo_root_cmd)
-
-    if vim.vshell_error == 0 and job_result then
-        root = vim.trim(job_result[1])
-        if root == "" then root = nil end -- handle empty output
+local function find_git_repo_root(current_path)
+    local parent_dir = Path:new(current_path):parent():absolute()
+    if not parent_dir then
+        vim.notify("Could not get parent directory for: " .. tostring(current_path), vim.log.levels.ERROR, { title="BetterGitBlame" })
+        return
     end
 
-    if not root then
-        vim.notify("Could not determine Git repository root", vim.log.levels.ERROR, { title="BetterGitBlame"})
+    local repo_root_cmd = { "git", "-C", vim.fn.fnameescape(parent_dir), "rev-parse", "--show-toplevel" }
+    local repo_root_list = vim.fn.systemlist(repo_root_cmd)
+    local repo_root = repo_root_list and repo_root_list[1]
+    if vim.vshell_error ~= nil then
+        if repo_root == "" then repo_root = nil end -- handle empty output
+        vim.notify("ERROR HERE", vim.log.levels.ERROR, { title="BetterGitBlame" })
     end
-    return root
+
+    if not repo_root then
+        vim.notify("Could not determine Git repository root. " .. tostring(parent_dir) .. " from " .. tostring(current_path), vim.log.levels.ERROR, { title="BetterGitBlame"})
+    end
+    return repo_root
 end
 
 -- parse output of git log
@@ -89,6 +98,47 @@ local function parse_git_log(output_lines)
         end
     end
     return commits
+end
+
+local function get_blame_commits(selection, repo_root, callback)
+    local current_path = Path:new(selection.file)
+    local rel_file_path = current_path:make_relative(repo_root)
+    if not rel_file_path then
+        vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
+        return
+    end
+
+    local log_range = string.format("%d,%d", selection.start_line, selection.end_line)
+    local format_arg = "--format=%H %ad %an %s"
+    local date_arg = "--date=short"
+    local range_arg = "-L" .. log_range .. ":" .. rel_file_path
+
+    -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
+    local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
+    vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
+
+    Job:new({
+        command = "git",
+        args = git_args,
+        cwd = repo_root,
+        on_exit = vim.schedule_wrap(function(j, return_val)
+            -- return val other than 0, consider error
+            if return_val ~= 0 then
+                local stderr = table.concat(j:stderr_result(), "\n")
+                vim.notify("git log failed".. stderr , vim.log.levels.ERROR, { title="BetterGitBlame"})
+                callback(nil, stderr)
+                return
+            end
+
+            local commit_list = parse_git_log(j:result())
+            -- no commit list
+            if #commit_list == 0 then
+                vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
+                -- callback with empty list
+            end
+            callback(commit_list, nil)
+        end),
+    }):start()
 end
 
 local function get_commit_details(repo_root, commit_hash, callback)
@@ -169,6 +219,64 @@ local function create_previewer(repo_root)
     })
 end
 
+local function launch_telescope_picker(commit_list, repo_root, selection)
+    pickers.new({}, {
+        prompt_title = "Code Block History",
+        finder = finders.new_table({
+            results = commit_list,
+            entry_maker = function(entry)
+
+                -- trim hash to first 6 characters
+                local trimmed_hash = string.sub(entry.hash, 1, 7)
+
+                return {
+                    value = entry,
+                    display = string.format("%s (%s) | %s | %s", trimmed_hash, entry.date, entry.author, entry.subject),
+                    ordinal = entry.date .. " " .. entry.hash,
+                }
+            end
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter({}),
+        previewer = create_previewer(repo_root),
+        layout_strategy = 'horizontal',
+        layout_config = {
+            horizontal = {
+                preview_width = 0.5,
+            }
+        },
+        -- mappings
+        -- map can be used for later keybind functionality
+        attach_mappings = function(prompt_bufnr, map)
+            -- local current_picker = action_state.get_current_picker(prompt_bufnr)
+
+            actions.select_default:replace(function()
+                local sel = action_state.get_selected_entry()
+                actions.close(prompt_bufnr)
+
+                if sel and sel.value and sel.value.hash then
+                    local hash = sel.value.hash
+                    local file = sel.filename
+
+                    -- where optional dependencies come in handy
+
+                    if vim.fn.exists(":Gvdiffsplit") == 2 then -- fugitive
+                        vim.cmd("Gvdiffsplit " .. hash)
+                    elseif vim.fn.exists(":DiffviewOpen") == 2 then --diffview
+                        vim.cmd("DiffviewOpen " .. hash .. ".." .. hash .. " -- " .. file)
+                    else
+                        if vim.fn.exists(":Git") == 2 then
+                            vim.cmd("tab Git show " .. hash)
+                        else
+                            vim.cmd("tabnew | term git -C " .. vim.fn.shellescape(repo_root) .. " show " .. hash)
+                        end
+                    end
+                end
+            end)
+            return true
+        end
+    }):find()
+end
+
 -- function called from BlameInvestigate
 function M.investigate_selection()
     -- get lines of visual selection
@@ -178,104 +286,20 @@ function M.investigate_selection()
     local repo_root = find_git_repo_root(selection.file)
     if not repo_root then return end -- handled in find_git_repo_root
 
-    local current_path = Path:new(selection.file)
-    local rel_file_path = current_path:make_relative(repo_root)
-    if not rel_file_path then
-        vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
-        return
-    end
+    -- update cached values for use in :BlameShowLast
+    current_state.last_selection = selection
+    current_state.last_repo_root = repo_root
 
-    local log_range = string.format("%d,%d", selection.start_line, selection.end_line)
-    local format_arg = "--format=%H %ad %an %s"
-    local date_arg = "--date=short"
-    local range_arg = "-L" .. log_range .. ":" .. rel_file_path
+    get_blame_commits(selection, repo_root, function(commit_list, err)
+        if err then
+            return
+        end
 
-    -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
-    local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
-    vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
-
-    Job:new({
-        command = "git",
-        args = git_args,
-        cwd = repo_root,
-        on_exit = vim.schedule_wrap(function(j, return_val)
-            -- return val other than 0, consider error
-            if return_val ~= 0 then
-                local stderr = table.concat(j:stderr_result(), "\n")
-                vim.notify("Failed Here".. stderr , vim.log.levels.ERROR, { title="BetterGitBlame"})
-                return
-            end
-
-            local commit_list = parse_git_log(j:result())
-            -- no commit list
-            if #commit_list == 0 then
-                vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
-                return
-            end
-
-            -- defining preview buffer
-            -- should probably do in its own function
-
-            pickers.new({}, {
-                prompt_title = "Code Block History",
-                finder = finders.new_table({
-                    results = commit_list,
-                    entry_maker = function(entry)
-
-                        -- trim hash to first 6 characters
-                        local trimmed_hash = string.sub(entry.hash, 1, 7)
-
-                        return {
-                            value = entry,
-                            display = string.format("%s (%s) | %s | %s", trimmed_hash, entry.date, entry.author, entry.subject),
-                            ordinal = entry.date .. " " .. entry.hash,
-                        }
-                    end
-                }),
-                sorter = sorters.get_generic_fuzzy_sorter({}),
-                previewer = create_previewer(repo_root),
-                layout_strategy = 'horizontal',
-                layout_config = {
-                    horizontal = {
-                        preview_width = 0.5,
-                    }
-                },
-                -- mappings
-                -- map can be used for later keybind functionality
-                attach_mappings = function(prompt_bufnr, map)
-                    -- local current_picker = action_state.get_current_picker(prompt_bufnr)
-
-                    actions.select_default:replace(function()
-                        local sel = action_state.get_selected_entry()
-                        actions.close(prompt_bufnr)
-
-                        if sel and sel.value and sel.value.hash then
-                            local hash = sel.value.hash
-                            local file = sel.filename
-
-                            -- where optional dependencies come in handy
-
-                            if vim.fn.exists(":Gvdiffsplit") == 2 then -- fugitive
-                                vim.cmd("Gvdiffsplit " .. hash)
-                            elseif vim.fn.exists(":DiffviewOpen") == 2 then --diffview
-                                vim.cmd("DiffviewOpen " .. hash .. ".." .. hash .. " -- " .. file)
-                            else
-                                if vim.fn.exists(":Git") == 2 then
-                                    vim.cmd("tab Git show " .. hash)
-                                else
-                                    vim.cmd("tabnew | term git -C " .. vim.fn.shellescape(repo_root) .. " show " .. hash)
-                                end
-                            end
-                        end
-                    end)
-
-                    return true
-                end
-            }):find()
-        end)
-    }):start()
+        -- update cached commit list
+        current_state.last_commits = commit_list
+        launch_telescope_picker(commit_list, repo_root, selection)
+    end)
 end
-
 
 function M.setup()
     vim.api.nvim_create_user_command("BlameInvestigate", M.investigate_selection, {
