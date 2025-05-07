@@ -13,12 +13,6 @@ local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 local utils = require("telescope.utils")
 
-local repo_root
-
-local function notify(msg, level, title)
-    utils.notify("BetterGitBlame", msg, level, title)
-end
-
 -- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
     local start_row, end_row
@@ -38,7 +32,7 @@ local function get_visual_selection()
 
     local file_path = vim.fn.expand("%:p")
     if not file_path or file_path == "" then
-        notify("No file name associated with buffer", vim.log.levels.WARN)
+        vim.notify("No file name associated with buffer", vim.log.levels.WARN, { title="BetterGitBlame"})
         return nil
     end
 
@@ -47,7 +41,7 @@ local function get_visual_selection()
             start_row = vim.fn.line(".")
             end_row = start_row
         else
-            notify("Could not determine selection range", vim.log.levels.WARN)
+            vim.notify("Could not determine selection range", vim.log.levels.WARN, { title="BetterGitBlame"})
         end
     end
 
@@ -59,12 +53,28 @@ local function get_visual_selection()
     return { file = file_path, start_line = start_row, end_line = end_row }
 end
 
+local function find_git_repo_root(path)
+    local parent_dir = Path:new(path):parent():absolute()
+    local repo_root_cmd = { "git", "-C", parent_dir, "rev-parse", "--show-toplevel" }
+    local root = nil
+    local job_result = vim.fn.systemlist(repo_root_cmd)
+
+    if vim.vshell_error == 0 and job_result then
+        root = vim.trim(job_result[1])
+        if root == "" then root = nil end -- handle empty output
+    end
+
+    if not root then
+        vim.notify("Could not determine Git repository root", vim.log.levels.ERROR, { title="BetterGitBlame"})
+    end
+    return root
+end
+
 -- parse output of git log
-local function parse_commit_list(output_lines)
-    print("Parsing commits")
+local function parse_git_log(output_lines)
     local commits = {}
 
-    -- funky
+    -- <hash> <date> <author> <subject>
     local pattern = "^([0-9a-f]+)%s+([%d-]+)%s+(.-)%s+(.*)$"
 
     for _, line in ipairs(output_lines) do
@@ -75,114 +85,100 @@ local function parse_commit_list(output_lines)
                 date = date,
                 author = author,
                 subject = subject,
-                -- raw = line
             })
         end
     end
     return commits
 end
 
+local function get_commit_details(repo_root, commit_hash, callback)
+    local diff_args = { "show", commit_hash }
+
+    local diff_output = {}
+    local error_output = {}
+    local exit_code = -1
+
+    Job:new({
+        command = "git",
+        args = diff_args,
+        cwd = repo_root,
+
+        on_stdout = function(_, data) if data then table.insert(diff_output, data) end end,
+        on_stderr = function(_, data) if data then table.insert(error_output, data) end end,
+
+        on_exit = vim.schedule_wrap(function(j, return_val)
+            exit_code = return_val
+            if return_val ~= 0 then
+                vim.notify("git show failed for diff: " .. commit_hash, vim.log.levels.WARN, { title="BetterGitBlame"})
+            end
+            callback(diff_output, error_output, exit_code)
+        end),
+    }):start()
+end
+
 -- defining preview window
-local git_previewer = previewers.new_buffer_previewer {
-    define_preview = function(self, entry, status)
-        if not vim.api.nvim_buf_is_valid(self.state.bufnr) then
-            return
-        end
+local function create_previewer(repo_root)
+    return previewers.new_buffer_previewer({
+        define_preview = function(self, entry, status)
+            if not vim.api.nvim_buf_is_valid(self.state.bufnr) then
+                return
+            end
 
-        -- set buffer modifiable and clear it
-        vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
-        vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
+            local bufnr = self.state.bufnr
 
-        -- clear buffer
-        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {})
+            -- set buffer modifiable and clear it
+            vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+            vim.api.nvim_buf_set_option(bufnr, "readonly", false)
 
-        if not entry or not entry.value or not entry.value.hash then
-            local err_msg = "Error invalid entry"
-            vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, { err_msg, vim.inspect(entry)})
-            vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
-            vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
-            return
-        end
+            -- filetype git
+            vim.api.nvim_buf_set_option(bufnr, "filetype", "git")
 
-        local commit_hash = entry.value.hash
-        local show_cmd_args = {"show", commit_hash}
+            -- clear buffer
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
 
-        -- there is surely a a cleaner way to handle buffer output
-        local output_lines = {}
-        local error_lines = {}
-        local job_exit_code = -1
+            if not entry or not entry.value or not entry.value.hash then
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "Error: Invalid entry", vim.inspect(entry)})
+                vim.api.nvim_buf_set_option(bufnr, "readonly", true)
+                vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+                return
+            end
 
-        Job:new({
-            command = "git",
-            args = show_cmd_args,
-            cwd = repo_root,
+            local commit_hash = entry.value.hash
 
-            on_stdout = function(_, data)
-                if data then table.insert(output_lines, data) end
-            end,
+            get_commit_details(repo_root, commit_hash, function(diff_lines, error_lines, exit_code)
+                if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
-            on_stderr = function(_, data)
-                if data then table.insert(error_lines, data) end
-            end,
-
-            on_exit = vim.schedule_wrap(function(_, code)
-                job_exit_code = code
-
-                if not vim.api.nvim_buf_is_valid(self.state.bufnr) then return end
-
-                local final_content = {}
-
-                if job_exit_code ~= 0 then
-
+                local final_content
+                if exit_code ~= 0 then
                     final_content = error_lines
-                    if #final_content == 0 then
-                        table.insert(final_content, "Failed")
-                    end
-
                 else
-                    final_content = output_lines
-                    if #final_content == 0 then
-                        table.insert(final_content, "Failed")
-                    end
+                    final_content = diff_lines
                 end
-                vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
-                vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
 
-                -- write final output and set filetype to git
-                vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, final_content)
-                vim.api.nvim_buf_set_option(self.state.bufnr, "filetype", "git")
+                vim.api.nvim_buf_set_option(bufnr, "modifiable", true)
+                vim.api.nvim_buf_set_option(bufnr, "readonly", false)
 
-                -- set readonly
-                vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
-                vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, final_content)
 
-            end),
-        }):start()
-    end,
-}
+                vim.api.nvim_buf_set_option(bufnr, "readonly", true)
+                vim.api.nvim_buf_set_option(bufnr, "modifiable", false)
+
+                vim.api.nvim_win_set_cursor(self.state.winid, {1, 0})
+            end)
+        end,
+    })
+end
 
 -- function called from BlameInvestigate
 function M.investigate_selection()
     -- get lines of visual selection
     local selection = get_visual_selection()
-    if not selection then
-        vim.notify("No selection", vim.log.levels.ERROR, { title="BetterGitBlame" })
-        return
-    end
+    if not selection then return end -- handled in get_visual_selection
+
+    local repo_root = find_git_repo_root(selection.file)
+    if not repo_root then return end -- handled in find_git_repo_root
 
     local current_path = Path:new(selection.file)
-
-    -- get root of git repo
-    local repo_root_cmd = string.format("git -C '%s' rev-parse --show-toplevel", vim.fn.fnameescape(current_path:parent():absolute()))
-    local repo_root_list = vim.fn.systemlist(repo_root_cmd)
-    repo_root = repo_root_list and repo_root_list[1]
-    repo_root = repo_root and vim.trim(repo_root)
-
-    if vim.vshell_error ~= nil or not repo_root or repo_root == "" then
-        vim.notify("Shell or repo root error: " .. repo_root , vim.log.levels.ERROR, { title="BetterGitBlame" })
-        return
-    end
-
     local rel_file_path = current_path:make_relative(repo_root)
     if not rel_file_path then
         vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
@@ -210,7 +206,7 @@ function M.investigate_selection()
                 return
             end
 
-            local commit_list = parse_commit_list(j:result())
+            local commit_list = parse_git_log(j:result())
             -- no commit list
             if #commit_list == 0 then
                 vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
@@ -237,7 +233,7 @@ function M.investigate_selection()
                     end
                 }),
                 sorter = sorters.get_generic_fuzzy_sorter({}),
-                previewer = git_previewer,
+                previewer = create_previewer(repo_root),
                 layout_strategy = 'horizontal',
                 layout_config = {
                     horizontal = {
