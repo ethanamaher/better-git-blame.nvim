@@ -12,6 +12,8 @@ local previewers = require("telescope.previewers")
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
 
+local repo_root
+
 -- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
     local _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
@@ -46,18 +48,97 @@ local function parse_commit_list(output_lines)
 
     for _, line in ipairs(output_lines) do
         local hash, date, author, subject = line:match(pattern)
-        if hash then
+        if hash and date and author and subject then
             table.insert(commits, {
                 hash = hash,
                 date = date,
                 author = author,
                 subject = subject,
-                raw = line
+                -- raw = line
             })
         end
     end
     return commits
 end
+
+-- defining preview window
+local git_previewer = previewers.new_buffer_previewer {
+    define_preview = function(self, entry, status)
+        if not vim.api.nvim_buf_is_valid(self.state.bufnr) then
+            return
+        end
+
+        -- set buffer modifiable and clear it
+        vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
+        vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
+
+        -- clear buffer
+        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {})
+
+        if not entry or not entry.value or not entry.value.hash then
+            local err_msg = "Error invalid entry"
+            vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, { err_msg, vim.inspect(entry)})
+            vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
+            vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
+            return
+        end
+
+        local commit_hash = entry.value.hash
+        local show_cmd_args = {"show", commit_hash}
+
+        -- there is surely a a cleaner way to handle buffer output
+        local output_lines = {}
+        local error_lines = {}
+        local job_exit_code = -1
+
+        Job:new({
+            command = "git",
+            args = show_cmd_args,
+            cwd = repo_root,
+
+            on_stdout = function(_, data)
+                if data then table.insert(output_lines, data) end
+            end,
+
+            on_stderr = function(_, data)
+                if data then table.insert(error_lines, data) end
+            end,
+
+            on_exit = vim.schedule_wrap(function(_, code)
+                job_exit_code = code
+
+                if not vim.api.nvim_buf_is_valid(self.state.bufnr) then return end
+
+                local final_content = {}
+
+                if job_exit_code ~= 0 then
+
+                    final_content = error_lines
+                    if #final_content == 0 then
+                        table.insert(final_content, "Failed")
+                    end
+
+                else
+                    final_content = output_lines
+                    if #final_content == 0 then
+                        table.insert(final_content, "Failed")
+                    end
+                end
+                vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
+                vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
+
+                -- write final output and set filetype to git
+                vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, final_content)
+                vim.api.nvim_buf_set_option(self.state.bufnr, "filetype", "git")
+
+                -- set readonly
+                vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
+                vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
+
+            end),
+        }):start()
+    end,
+}
 
 -- function called from BlameInvestigate
 function M.investigate_selection()
@@ -73,7 +154,7 @@ function M.investigate_selection()
     -- get root of git repo
     local repo_root_cmd = string.format("git -C '%s' rev-parse --show-toplevel", vim.fn.fnameescape(current_path:parent():absolute()))
     local repo_root_list = vim.fn.systemlist(repo_root_cmd)
-    local repo_root = repo_root_list and repo_root_list[1]
+    repo_root = repo_root_list and repo_root_list[1]
     repo_root = repo_root and vim.trim(repo_root)
 
     if vim.vshell_error ~= nil or not repo_root or repo_root == "" then
@@ -96,7 +177,7 @@ function M.investigate_selection()
     local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
     vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
 
-    local job = Job:new({
+    Job:new({
         command = "git",
         args = git_args,
         cwd = repo_root,
@@ -116,83 +197,7 @@ function M.investigate_selection()
             end
 
             -- defining preview buffer
-            local git_previewer = previewers.new_buffer_previewer {
-                define_preview = function(self, entry, status)
-                    if not vim.api.nvim_buf_is_valid(self.state.bufnr) then
-                        return
-                    end
-
-                    -- set buffer modifiable and clear it
-                    vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
-                    vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
-
-                    -- clear buffer
-                    vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {})
-
-                    if not entry or not entry.value or not entry.value.hash then
-                        local err_msg = "Error invalid entry"
-                        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, { err_msg, vim.inspect(entry)})
-                        vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
-                        vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
-                        return
-                    end
-
-                    local commit_hash = entry.value.hash
-                    local show_cmd_args = {"show", commit_hash}
-
-                    -- there is surely a a cleaner way to handle buffer output
-                    local output_lines = {}
-                    local error_lines = {}
-                    local job_exit_code = -1
-
-                    Job:new({
-                        command = "git",
-                        args = show_cmd_args,
-                        cwd = repo_root,
-
-                        on_stdout = function(_, data)
-                            if data then table.insert(output_lines, data) end
-                        end,
-
-                        on_stderr = function(_, data)
-                            if data then table.insert(error_lines, data) end
-                        end,
-
-                        on_exit = vim.schedule_wrap(function(_, code)
-                            job_exit_code = code
-
-                            if not vim.api.nvim_buf_is_valid(self.state.bufnr) then return end
-
-                            local final_content = {}
-
-                            if job_exit_code ~= 0 then
-
-                                final_content = error_lines
-                                if #final_content == 0 then
-                                    table.insert(final_content, "Failed")
-                                end
-
-                            else
-                                final_content = output_lines
-                                if #final_content == 0 then
-                                    table.insert(final_content, "Failed")
-                                end
-                            end
-                            vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", true)
-                            vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", false)
-
-                            -- write final output and set filetype to git
-                            vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, final_content)
-                            vim.api.nvim_buf_set_option(self.state.bufnr, "filetype", "git")
-
-                            -- set readonly
-                            vim.api.nvim_buf_set_option(self.state.bufnr, "readonly", true)
-                            vim.api.nvim_buf_set_option(self.state.bufnr, "modifiable", false)
-
-                        end),
-                    }):start()
-                end,
-            }
+            -- should probably do in its own function
 
             pickers.new({}, {
                 prompt_title = "Code Block History",
@@ -219,6 +224,7 @@ function M.investigate_selection()
                     }
                 },
                 -- mappings
+                -- map can be used for later keybind functionality
                 attach_mappings = function(prompt_bufnr, map)
                     -- local current_picker = action_state.get_current_picker(prompt_bufnr)
 
