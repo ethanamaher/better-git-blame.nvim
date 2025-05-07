@@ -11,23 +11,44 @@ local sorters = require("telescope.sorters")
 local previewers = require("telescope.previewers")
 local actions = require("telescope.actions")
 local action_state = require("telescope.actions.state")
+local utils = require("telescope.utils")
 
 local repo_root
 
+local function notify(msg, level, title)
+    utils.notify("BetterGitBlame", msg, level, title)
+end
+
 -- get the file, start_line, and end_line of visual selection
 local function get_visual_selection()
-    local _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
-    local _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
-    local file_path = vim.fn.expand("%:p")
+    local start_row, end_row
+    -- check for in visual mode
+    local is_visual_mode = vim.fn.mode():find("[vV]")
 
+
+    -- if in visual mode get selection range
+    -- if not in visual mode use current line
+    if is_visual_mode then
+        _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
+        _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
+    else
+        start_row = vim.fn.line(".")
+        end_row = start_row
+    end
+
+    local file_path = vim.fn.expand("%:p")
     if not file_path or file_path == "" then
-        vim.notify("No file name associated with buffer", vim.log.levels.WARN, { title="BetterGitBlame" })
+        notify("No file name associated with buffer", vim.log.levels.WARN)
         return nil
     end
 
     if start_row == 0 or end_row == 0 then
-        vim.notify("Could not find start or end row", vim.log.levels.WARN, { title="BetterGitBlame" })
-        return nil
+        if not is_visual_mode then
+            start_row = vim.fn.line(".")
+            end_row = start_row
+        else
+            notify("Could not determine selection range", vim.log.levels.WARN)
+        end
     end
 
     -- handle backward selection
