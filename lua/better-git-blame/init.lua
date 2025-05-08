@@ -66,6 +66,7 @@ local function find_git_repo_root(current_path)
     local repo_root_cmd = { "git", "-C", vim.fn.fnameescape(parent_dir), "rev-parse", "--show-toplevel" }
     local repo_root_list = vim.fn.systemlist(repo_root_cmd)
     local repo_root = repo_root_list and repo_root_list[1]
+
     if vim.vshell_error ~= nil then
         if repo_root == "" then repo_root = nil end -- handle empty output
         vim.notify("ERROR HERE", vim.log.levels.ERROR, { title="BetterGitBlame" })
@@ -161,6 +162,73 @@ local function get_commit_details(repo_root, commit_hash, callback)
             end
             callback(diff_output, error_output, exit_code)
         end),
+    }):start()
+end
+
+local function get_git_remote_url(repo_root)
+    local args = { "git", "-C", repo_root,  "remote", "get-url", "origin" }
+    local result = vim.fn.systemlist(args)
+    if result then
+        return vim.trim(result[1])
+    end
+
+    return nil
+end
+
+local function parse_git_url(url)
+    -- try ssh format
+    local ssh_host, ssh_path = url:match("^git@([^:]+):(.+)$")
+    if ssh_host and ssh_path then
+        return { host = ssh_host, path = ssh_path }
+    end
+
+    -- try http/https format
+    -- should work but not tested other than in regex matcher. seems fine
+    local https_host, https_path = url:match("^http[s]?://([^/]+)(/.+)$")
+    if https_host and https_path then
+        -- remove leading '/' in https path
+        https_path = https_path:sub(2)
+        return { host = https_host, path = https_path }
+    end
+    return nil
+end
+
+local function open_commit_in_browser(repo_root, commit_hash)
+    local remote_url = get_git_remote_url(repo_root)
+    if not remote_url then
+        vim.notify("Could not determine remote URL: ", vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
+        return
+    end
+
+    local parsed_url = parse_git_url(remote_url)
+    if not parsed_url then
+        vim.notify("Could not parse remote URL: " .. parsed_url, vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
+        return
+    end
+
+    local commit_url = nil
+    local host = parsed_url.host:lower()
+    local path = parsed_url.path
+
+    -- TODO
+    -- support other hosts
+    if host:find("github.com") then
+        commit_url = string.format("https://%s/%s/commit/%s", host, path, commit_hash)
+    else
+        vim.notify("Unsupported git host: " .. parsed_url.host, vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
+        return
+    end
+
+    Job:new({
+        -- TODO support for non linux xdg-open
+        command = "xdg-open",
+        args = { commit_url },
+
+        on_exit = function(_, code)
+            if code ~= 0 then
+                vim.notify("Failed to open URL.", vim.log.levels.ERROR, { title="BetterGitBlame:OpenCommitInBrowser" })
+            end
+        end
     }):start()
 end
 
@@ -270,6 +338,15 @@ local function launch_telescope_picker(commit_list, repo_root, selection)
                     end
                 end
             end)
+            -- Ctrl+b in telescope picker to open commit in browser
+            map({"i", "n"}, "<C-b>", function()
+                local sel = action_state.get_selected_entry()
+                if sel and sel.value and sel.value.hash then
+                    open_commit_in_browser(repo_root, sel.value.hash)
+                else
+                    vim.notify("No valid commit selected to open", vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
+                end
+            end)
             return true
         end
     }):find()
@@ -312,6 +389,8 @@ function M.show_last_investigation()
 end
 
 function M.setup()
+    --config = vim.tbl_deep_extend("force", config, user_config or {})
+
     vim.api.nvim_create_user_command("BlameInvestigate", M.investigate_selection, {
         range = true,
         desc = "Investigate Git history of selected code block",
