@@ -178,11 +178,9 @@ end
 local function parse_git_url(url)
     -- try ssh format
     local ssh_host, ssh_path = url:match("^git@([^:]+):(.+)$")
-    print(ssh_host)
-    print(ssh_path)
     if ssh_host and ssh_path then
-        -- if optional.git at end of path, remove
-        if ssh_path:find(".git") then
+        -- if optional .git at end of path, remove
+        if ssh_path:find(".git$") then
             ssh_path = ssh_path:sub(1, -5)
         end
         return { host = ssh_host, path = ssh_path }
