@@ -19,41 +19,19 @@ local current_state = {
 }
 
 -- get the file, start_line, and end_line of visual selection
-local function get_visual_selection()
-    -- add later, if not in visual mode, use current line
-    local start_row, end_row
-
-    local current_mode = vim.fn.mode(true)
-    local is_visual_mode = current_mode:find("[vV]") ~= nil
-
-    if is_visual_mode then
-        -- use '< and '> to get visual selection
-        _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
-        _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
-    else
-        start_row = vim.fn.line(".")
-        end_row = start_row
-    end
-
+local function get_visual_selection(start_line, end_line)
     local file_path = vim.fn.expand("%:p")
     if not file_path or file_path == "" then
         vim.notify("No file name associated with buffer", vim.log.levels.WARN, { title="BetterGitBlame"})
         return nil
     end
 
-    if is_visual_mode and (start_row == 0 or end_row == 0) then
-        vim.notify("Could not determine selection range", vim.log.levels.WARN, { title="BetterGitBlame"})
-        return nil
-    elseif not is_visual_mode and start_row == 0 then
-        return nil
-    end
-
     -- handle backward selection
-    if start_row > end_row then
-        start_row, end_row = end_row, start_row
+    if start_line > end_line then
+        start_line, end_line= end_line, start_line
     end
 
-    return { file = file_path, start_line = start_row, end_line = end_row }
+    return { file = file_path, start_line = start_line, end_line = end_line }
 end
 
 local function find_git_repo_root(current_path)
@@ -357,9 +335,9 @@ local function launch_telescope_picker(commit_list, repo_root, selection)
 end
 
 -- function called from BlameInvestigate
-function M.investigate_selection()
+function M.investigate_selection(args)
     -- get lines of visual selection
-    local selection = get_visual_selection()
+    local selection = get_visual_selection(args.line1, args.line2)
     if not selection then return end -- handled in get_visual_selection
 
     local repo_root = find_git_repo_root(selection.file)
