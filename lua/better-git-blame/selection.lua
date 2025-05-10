@@ -53,6 +53,24 @@ function M.get_visual_selection_content(start_line, end_line)
     return vis_selection, lines
 end
 
+-- find longest, non-empty line for -S pickaxe
+function M.derive_pickaxe_from_lines(lines)
+    local longest_line = ""
+    if lines then
+        for _, line in ipairs(lines) do
+            local trimmed_line = vim.trim(line)
+            if trimmed_line ~= "" and #trimmed_line > #longest_line then
+                longest_line = trimmed_line
+            end
+        end
+    end
+
+    if longest_line == "" then
+        return nil, nil
+    end
+    return longest_line, "pickaxe"
+end
+
 function M.derive_regex_from_lines(lines)
     -- fallback to pickaxe
     if not lines then return nil, nil end

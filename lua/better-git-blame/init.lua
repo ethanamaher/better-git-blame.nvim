@@ -52,10 +52,13 @@ function M.investigate_content(args)
     local repo_root = git_utils.find_git_repo_root(selection.file)
     if not repo_root then return end -- handled in find_git_repo_root
 
-    local search_term, search_type = selection_utils.derive_regex_from_lines(lines)
+    --local search_term, search_type = selection_utils.derive_regex_from_lines(lines)
+    local search_term, search_type = selection_utils.derive_pickaxe_from_lines(lines)
     if not search_term or not search_type then
         return
     end
+
+    print(search_type .. ": " .. search_term)
 
     -- update cached values for use in :BlameShowLast
     current_state.last_selection = selection

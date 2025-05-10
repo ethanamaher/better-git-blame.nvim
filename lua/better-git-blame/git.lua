@@ -100,8 +100,17 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, search_
 
     local format_arg = "--format=%H %ad %an %s"
     local date_arg = "--date=short"
-    local search_arg_option = "-G" .. search_term
-    local search_description = "regex -G"
+
+    local search_arg_option
+    local search_description
+
+    if search_type == "regex" then
+        search_arg_option = "-G" .. search_term
+        search_description = "regex -G"
+    elseif search_type == "pickaxe" then
+        search_arg_option = "-S" .. search_term
+        search_description = "pickaxe -S"
+    end
 
     local git_args = { "-C", repo_root, "log", search_arg_option, format_arg, date_arg, "--", rel_file_path }
 
