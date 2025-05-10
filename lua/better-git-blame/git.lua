@@ -89,6 +89,53 @@ function M.get_blame_commits(selection, repo_root, callback)
     }):start()
 end
 
+function M.get_commits_by_search_term(selection, repo_root, search_term, search_type, callback)
+    local current_path = Path:new(selection.file)
+    local rel_file_path = current_path:make_relative(repo_root)
+    if not rel_file_path then
+        vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
+        callback(nil, "Relative path error")
+        return
+    end
+
+    local format_arg = "--format=%H %ad %an %s"
+    local date_arg = "--date=short"
+    local search_arg_option = "-G" .. search_term
+    local search_description = "regex -G"
+
+    local git_args = { "-C", repo_root, "log", search_arg_option, format_arg, date_arg, "--", rel_file_path }
+
+    Job:new({
+        command = "git",
+        args = git_args,
+        cwd = repo_root,
+        on_exit = vim.schedule_wrap(function(j, return_val)
+            local stderr_lines = j:stderr_result()
+            local stderr = stderr_lines and table.concat(stderr_lines, "\n") or ""
+            if return_val ~= 0 then
+                vim.notify("git log %s failed: %s".. search_description, stderr, vim.log.levels.ERROR, { title="BetterGitBlame"})
+                callback(nil, stderr)
+                return
+            end
+
+            if stderr:match("fatal: ambiguous argument") or stderr:match("fatal: bad revision") or stderr:match("Invalid regular expression") then
+                vim.notify("git log %s fatal error: %s".. search_description, stderr, vim.log.levels.ERROR, { title="BetterGitBlame"})
+                callback(nil, stderr)
+                return
+            end
+
+            local commit_list = M.parse_git_log(j:result())
+
+            if #commit_list == 0 then
+                vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
+                -- callback with empty list
+            end
+            callback(commit_list, nil)
+        end),
+    }):start()
+
+end
+
 function M.get_commit_details(repo_root, commit_hash, callback)
     local diff_args = { "show", commit_hash }
 
