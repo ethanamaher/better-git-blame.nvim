@@ -14,7 +14,6 @@ local current_state = {
     last_commit_list = nil,
 
     last_search_term = nil,
-    last_search_type = nil,
 }
 
 -- function called from BlameInvestigate
@@ -30,7 +29,6 @@ function M.investigate_selection(args)
     -- update cached values for use in :BlameShowLast
     current_state.last_selection = selection
     current_state.last_repo_root = repo_root
-    current_state.last_search_type = "line"
 
 
     git_utils.get_blame_commits(selection, repo_root, function(commit_list, err)
@@ -52,21 +50,14 @@ function M.investigate_content(args)
     local repo_root = git_utils.find_git_repo_root(selection.file)
     if not repo_root then return end -- handled in find_git_repo_root
 
-    --local search_term, search_type = selection_utils.derive_regex_from_lines(lines)
-    local search_term, search_type = selection_utils.derive_pickaxe_from_lines(lines)
-    if not search_term or not search_type then
-        return
-    end
-
-    print(search_type .. ": " .. search_term)
+    local search_term = selection_utils.derive_regex_from_lines(lines)
 
     -- update cached values for use in :BlameShowLast
     current_state.last_selection = selection
     current_state.last_repo_root = repo_root
     current_state.last_search_term = search_term
-    current_state.last_search_type = search_type
 
-    git_utils.get_commits_by_search_term(selection, repo_root, search_term, search_type, function(commit_list, err)
+    git_utils.get_commits_by_search_term(selection, repo_root, search_term, function(commit_list, err)
         if err then return end
         current_state.last_commit_list = commit_list
 
@@ -83,12 +74,7 @@ function M.show_last_investigation()
         return
     end
 
-    local title = ""
-
-    if current_state.last_search_type == "line" then
-        title = string.format("Git History (%d - %d)", selection.start_line, selection.end_line)
-    end
-
+    local title = string.format("Git History (%d - %d)", selection.start_line, selection.end_line)
 
     telescope_integration.launch_telescope_picker(current_state.last_commits, current_state.last_repo_root, current_state.last_selection, title)
 end

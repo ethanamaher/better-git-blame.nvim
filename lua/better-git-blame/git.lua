@@ -89,7 +89,7 @@ function M.get_blame_commits(selection, repo_root, callback)
     }):start()
 end
 
-function M.get_commits_by_search_term(selection, repo_root, search_term, search_type, callback)
+function M.get_commits_by_search_term(selection, repo_root, search_term, callback)
     local current_path = Path:new(selection.file)
     local rel_file_path = current_path:make_relative(repo_root)
     if not rel_file_path then
@@ -101,16 +101,8 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, search_
     local format_arg = "--format=%H %ad %an %s"
     local date_arg = "--date=short"
 
-    local search_arg_option
-    local search_description
-
-    if search_type == "regex" then
-        search_arg_option = "-G" .. search_term
-        search_description = "regex -G"
-    elseif search_type == "pickaxe" then
-        search_arg_option = "-S" .. search_term
-        search_description = "pickaxe -S"
-    end
+    local search_arg_option = "-G" .. search_term
+    local search_description = "regex -G"
 
     local git_args = { "-C", repo_root, "log", search_arg_option, format_arg, date_arg, "--", rel_file_path }
 

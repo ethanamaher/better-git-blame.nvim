@@ -53,8 +53,11 @@ function M.get_visual_selection_content(start_line, end_line)
     return vis_selection, lines
 end
 
--- find longest, non-empty line for -S pickaxe
-function M.derive_pickaxe_from_lines(lines)
+-- pick longest line from selection and use escape_posix_ere to create regex for it
+-- a little more fuzzy than searching directly for string
+function M.derive_regex_from_lines(lines)
+    -- fallback to pickaxe
+    if not lines then return nil end
     local longest_line = ""
     if lines then
         for _, line in ipairs(lines) do
@@ -66,50 +69,19 @@ function M.derive_pickaxe_from_lines(lines)
     end
 
     if longest_line == "" then
-        return nil, nil
-    end
-    return longest_line, "pickaxe"
-end
-
-function M.derive_regex_from_lines(lines)
-    -- fallback to pickaxe
-    if not lines then return nil, nil end
-
-    local significant_line_regexes = {}
-    for _, line in ipairs(lines) do
-        local trimmed_line = vim.trim(line)
-
-        if trimmed_line ~= 0 then
-            local escaped_line = escape_posix_ere(line)
-            local parts = {}
-            for part in escaped_line:gmatch("[^%s]+") do
-                table.insert(parts, part)
-            end
-            table.insert(significant_line_regexes, table.concat(parts, "\\s+"))
-        end
+        return nil
     end
 
-    if #significant_line_regexes == 0 then
-        --fallback to pickaxe
-        return nil, nil
-    end
+    local longest_line_escaped = escape_posix_ere(longest_line)
 
-    -- okay git regex is kind of scuffed so for now just regex matching first line in selection
-    -- could theoretically chain together multiple git log commands
-
-    local final_regex
-    if significant_line_regexes then
-        final_regex = significant_line_regexes[1]
-    --else
-      --  final_regex = table.concat(significant_line_regexes, "[\\s\\S]*?")
-    end
+    local final_regex = longest_line_escaped
 
     if final_regex == "" or not final_regex then
         --fallback to pickaxe
-        return nil, nil
+        return nil
     end
 
-    return final_regex, "regex"
+    return final_regex
 end
 
 return M
