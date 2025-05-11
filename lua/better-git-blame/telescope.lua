@@ -81,8 +81,8 @@ function M.launch_telescope_picker(commit_list, repo_root, selection)
 
                 return {
                     value = entry,
-                    display = string.format("%s (%s) | %s | %s", trimmed_hash, entry.date, entry.author, entry.subject),
-                    ordinal = entry.date .. " " .. entry.hash,
+                    display = string.format("%s (%s %s) | %s | %s", trimmed_hash, entry.date, entry.time, entry.author, entry.subject),
+                    ordinal = entry.date .. " " .. entry.time,
                 }
             end
         }),

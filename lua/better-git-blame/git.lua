@@ -32,14 +32,15 @@ function M.parse_git_log(output_lines)
     local commits = {}
 
     -- <hash> <date> <author> <subject>
-    local pattern = "^([0-9a-f]+)%s+([%d-]+)%s+(.-)%s+(.*)$"
+    local pattern = "^([0-9a-f]+)%s+([%d-]+)%s+([%d:]+)%s+(.-)%s+(.*)$"
 
     for _, line in ipairs(output_lines) do
-        local hash, date, author, subject = line:match(pattern)
-        if hash and date and author and subject then
+        local hash, date, time, author, subject = line:match(pattern)
+        if hash and date and time and author and subject then
             table.insert(commits, {
                 hash = hash,
                 date = date,
+                time = time,
                 author = author,
                 subject = subject,
             })
@@ -58,7 +59,7 @@ function M.get_blame_commits(selection, repo_root, callback)
 
     local log_range = string.format("%d,%d", selection.start_line, selection.end_line)
     local format_arg = "--format=%H %ad %an %s"
-    local date_arg = "--date=short"
+    local date_arg = "--date=format:%Y-%m-%d %H:%M:%S"
     local range_arg = "-L" .. log_range .. ":" .. rel_file_path
 
     -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
@@ -99,7 +100,7 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, callbac
     end
 
     local format_arg = "--format=%H %ad %an %s"
-    local date_arg = "--date=short"
+    local date_arg = "--date=format:%Y-%m-%d %H:%M:%S"
 
     local search_arg_option = "-G" .. search_term
     local search_description = "regex -G"
