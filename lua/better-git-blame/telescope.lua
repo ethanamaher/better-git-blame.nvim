@@ -122,11 +122,12 @@ function M.launch_telescope_picker(commit_list, repo_root, selection)
                     end
                 end
             end)
+            -- TODO commands to change diff view between HEAD, parent, working,
             -- Ctrl+b in telescope picker to open commit in browser
             map({"i", "n"}, "<C-b>", function()
                 local sel = action_state.get_selected_entry()
                 if sel and sel.value and sel.value.hash then
-                    open_commit_in_browser(repo_root, sel.value.hash)
+                    git_utils.open_commit_in_browser(repo_root, sel.value.hash)
                 else
                     vim.notify("No valid commit selected to open", vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
                 end

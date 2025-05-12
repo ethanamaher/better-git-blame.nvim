@@ -5,6 +5,14 @@ local M = {}
 local Job = require("plenary.job")
 local Path = require("plenary.path")
 
+local format_arg = "--format=%H %ad %an %s"
+local date_arg = "--date=format:%Y-%m-%d %H:%M:%S"
+
+-- find git repo root
+-- runs git rev-parse --show-toplevel from parent dir.
+-- TODO check if current_path is file
+-- if file do parent():absolute()
+-- else for :absolute()
 function M.find_git_repo_root(current_path)
     local parent_dir = Path:new(current_path):parent():absolute()
     if not parent_dir then
@@ -28,6 +36,11 @@ function M.find_git_repo_root(current_path)
 end
 
 -- parse output of git log
+-- put into table with each element.
+-- must be used with hardcoded format and date arguments
+--
+-- --format=%H %ad %an %s
+-- --date=format:%Y-%m-%d %H:%M:%S
 function M.parse_git_log(output_lines)
     local commits = {}
 
@@ -35,21 +48,24 @@ function M.parse_git_log(output_lines)
     local pattern = "^([0-9a-f]+)%s+([%d-]+)%s+([%d:]+)%s+(.-)%s+(.*)$"
 
     for _, line in ipairs(output_lines) do
-        local hash, date, time, author, subject = line:match(pattern)
-        if hash and date and time and author and subject then
+        local hash, date, time, author, message = line:match(pattern)
+        if hash and date and time and author and message then
             table.insert(commits, {
                 hash = hash,
                 date = date,
                 time = time,
                 author = author,
-                subject = subject,
+                message = message,
             })
         end
     end
     return commits
 end
 
-function M.get_blame_commits(selection, repo_root, callback)
+-- driver function for BlameInvestigate
+-- git log -L<start>:<end>
+-- output of git log is parsed into commit_list table and returned
+function M.get_commits_by_line(selection, repo_root, callback)
     local current_path = Path:new(selection.file)
     local rel_file_path = current_path:make_relative(repo_root)
     if not rel_file_path then
@@ -58,8 +74,6 @@ function M.get_blame_commits(selection, repo_root, callback)
     end
 
     local log_range = string.format("%d,%d", selection.start_line, selection.end_line)
-    local format_arg = "--format=%H %ad %an %s"
-    local date_arg = "--date=format:%Y-%m-%d %H:%M:%S"
     local range_arg = "-L" .. log_range .. ":" .. rel_file_path
 
     -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
@@ -90,6 +104,9 @@ function M.get_blame_commits(selection, repo_root, callback)
     }):start()
 end
 
+-- driver function for BlameInvestigateContent
+-- git log -G<regex>
+-- output of git log is parsed into commit_list table and returned
 function M.get_commits_by_search_term(selection, repo_root, search_term, callback)
     local current_path = Path:new(selection.file)
     local rel_file_path = current_path:make_relative(repo_root)
@@ -98,9 +115,6 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, callbac
         callback(nil, "Relative path error")
         return
     end
-
-    local format_arg = "--format=%H %ad %an %s"
-    local date_arg = "--date=format:%Y-%m-%d %H:%M:%S"
 
     local search_arg_option = "-G" .. search_term
     local search_description = "regex -G"
@@ -135,9 +149,50 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, callbac
             callback(commit_list, nil)
         end),
     }):start()
-
 end
 
+function M.get_commits_by_func_name(selection, repo_root, function_names, callback)
+    local current_path = Path:new(selection.file)
+    local rel_file_path = current_path:make_relative(repo_root)
+    if not rel_file_path then
+        vim.notify("could not find relative file path", vim.log.levels.ERROR, { title="BetterGitBlame" })
+        return
+    end
+
+    for _, function_name in ipairs(function_names) do
+        local range_arg = "-L:" .. function_name .. ":" .. rel_file_path
+
+        -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
+        local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
+        vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
+
+        Job:new({
+            command = "git",
+            args = git_args,
+            cwd = repo_root,
+            on_exit = vim.schedule_wrap(function(j, return_val)
+                -- return val other than 0, consider error
+                if return_val ~= 0 then
+                    local stderr = table.concat(j:stderr_result(), "\n")
+                    vim.notify("git log failed".. stderr , vim.log.levels.ERROR, { title="BetterGitBlame"})
+                    callback(nil, stderr)
+                    return
+                end
+
+                local commit_list = M.parse_git_log(j:result())
+                -- no commit list
+                if #commit_list == 0 then
+                    vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
+                    -- callback with empty list
+                end
+                callback(commit_list, nil)
+            end),
+        }):start()
+    end
+end
+
+-- used for getting diff output from commit hash
+-- git show <hash>
 function M.get_commit_details(repo_root, commit_hash, callback)
     local diff_args = { "show", commit_hash }
 
@@ -173,6 +228,8 @@ function M.get_git_remote_url(repo_root)
     return nil
 end
 
+-- parse a remote url from get_git_remote_url
+-- should work for both ssh and https urls
 function M.parse_git_url(url)
     -- try ssh format
     local ssh_host, ssh_path = url:match("^git@([^:]+):(.+)$")
@@ -212,8 +269,7 @@ function M.open_commit_in_browser(repo_root, commit_hash)
     local host = parsed_url.host:lower()
     local path = parsed_url.path
 
-    -- TODO
-    -- support other hosts
+    -- TODO support other hosts
     if host:find("github.com") then
         commit_url = string.format("https://%s/%s/commit/%s", host, path, commit_hash)
     else
@@ -221,6 +277,7 @@ function M.open_commit_in_browser(repo_root, commit_hash)
         return
     end
 
+    -- use xdg-open to open the commit url in default browser
     Job:new({
         -- TODO support for non linux xdg-open
         command = "xdg-open",

@@ -8,16 +8,15 @@ local telescope_integration = require("better-git-blame.telescope")
 
 telescope_integration.setup_dependencies(git_utils)
 
+-- used to store state of last commit_list and the information used to get it
 local current_state = {
     last_selection = nil,
     last_repo_root = nil,
     last_commit_list = nil,
-
     last_search_term = nil,
 }
 
--- function called from BlameInvestigate
--- line based search
+-- function for :BlameInvestigate
 function M.investigate_selection(args)
     -- get lines of visual selection
     local selection = selection_utils.get_visual_selection(args.line1, args.line2)
@@ -29,9 +28,9 @@ function M.investigate_selection(args)
     -- update cached values for use in :BlameShowLast
     current_state.last_selection = selection
     current_state.last_repo_root = repo_root
+    current_state.last_search_term = nil
 
-
-    git_utils.get_blame_commits(selection, repo_root, function(commit_list, err)
+    git_utils.get_commits_by_line(selection, repo_root, function(commit_list, err)
         if err then
             return
         end
@@ -43,9 +42,10 @@ function M.investigate_selection(args)
     end)
 end
 
+-- function for :BlameInvestigateContent
 function M.investigate_content(args)
     local selection, lines = selection_utils.get_visual_selection_content(args.line1, args.line2)
-
+    if not selection then return end
 
     local repo_root = git_utils.find_git_repo_root(selection.file)
     if not repo_root then return end -- handled in find_git_repo_root
@@ -66,6 +66,7 @@ function M.investigate_content(args)
     end)
 end
 
+-- function for :BlameShowLast
 function M.show_last_investigation()
     if not current_state.last_selection or
         not current_state.last_repo_root or
@@ -73,18 +74,39 @@ function M.show_last_investigation()
         vim.notify("Not previous investigation stored.", vim.log.levels.WARN, { title="BetterGitBlame:BlameShowLast" })
         return
     end
-
-    local title = string.format("Git History (%d - %d)", selection.start_line, selection.end_line)
+    local title = string.format("Git History (%d - %d)", current_state.last_selection.start_line, current_state.last_selection.end_line)
 
     telescope_integration.launch_telescope_picker(current_state.last_commits, current_state.last_repo_root, current_state.last_selection, title)
 end
 
+-- function for :BlameInvestigateFunction
+function M.investigate_function_names(args)
+    local selection, func_names = selection_utils.get_function_names_from_selection(args.line1, args.line2)
+    if not selection then return end
+
+    local repo_root = git_utils.find_git_repo_root(selection.file)
+    if not repo_root then return end -- handled in find_git_repo_root
+
+    current_state.last_selection = selection
+    current_state.last_repo_root = repo_root
+    current_state.last_search_term = nil
+
+    git_utils.get_commits_by_func_name(selection, repo_root, func_names, function(commit_list, err)
+        if err then return end
+        current_state.last_commit_list = commit_list
+
+        local title = string.format("Git History (function search)")
+        telescope_integration.launch_telescope_picker(commit_list, repo_root, selection, title)
+    end)
+end
+
+-- setup all commands for BetterGitBlame
 function M.setup()
     --config = vim.tbl_deep_extend("force", config, user_config or {})
 
     vim.api.nvim_create_user_command("BlameInvestigate", M.investigate_selection, {
         range = true,
-        desc = "Investigate Git history of selected code block (line-based)",
+        desc = "Investigate Git history of selected code block by visually selecting lines. git log -L<start_line>:<end_line>",
     })
 
     vim.api.nvim_create_user_command("BlameShowLast", M.show_last_investigation, {
@@ -93,7 +115,12 @@ function M.setup()
 
     vim.api.nvim_create_user_command("BlameInvestigateContent", M.investigate_content, {
         range = true,
-        desc = "Investigate Git history for content similar to selection",
+        desc = "Investigate Git history for content similar to selection. git log -G<regex_string>",
+    })
+
+    vim.api.nvim_create_user_command("BlameInvestigateFunction", M.investigate_function_names, {
+        range = true,
+        desc = "Investigate git history by identifying function names in selected code block. git log -L:<func_name>:<file_name>",
     })
 end
 
