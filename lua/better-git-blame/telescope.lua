@@ -69,9 +69,9 @@ local function create_previewer(repo_root)
     })
 end
 
-function M.launch_telescope_picker(commit_list, repo_root, selection)
+function M.launch_telescope_picker(commit_list, repo_root, selection, title)
     pickers.new({}, {
-        prompt_title = "Code Block History",
+        prompt_title = title or "BetterGitBlame",
         finder = finders.new_table({
             results = commit_list,
             entry_maker = function(entry)
@@ -81,7 +81,7 @@ function M.launch_telescope_picker(commit_list, repo_root, selection)
 
                 return {
                     value = entry,
-                    display = string.format("%s (%s %s) | %s | %s", trimmed_hash, entry.date, entry.time, entry.author, entry.subject),
+                    display = string.format("%s (%s %s) | %s | %s", trimmed_hash, entry.date, entry.time, entry.author, entry.message),
                     ordinal = entry.date .. " " .. entry.time,
                 }
             end

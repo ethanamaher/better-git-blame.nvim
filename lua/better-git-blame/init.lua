@@ -16,8 +16,8 @@ local current_state = {
     last_search_term = nil,
 }
 
--- function for :BlameInvestigate
-function M.investigate_selection(args)
+-- function for :BlameInvestigateLines
+function M.investigate_lines(args)
     -- get lines of visual selection
     local selection = selection_utils.get_visual_selection(args.line1, args.line2)
     if not selection then return end -- handled in get_visual_selection
@@ -104,7 +104,7 @@ end
 function M.setup()
     --config = vim.tbl_deep_extend("force", config, user_config or {})
 
-    vim.api.nvim_create_user_command("BlameInvestigate", M.investigate_selection, {
+    vim.api.nvim_create_user_command("BlameInvestigatLines", M.investigate_lines, {
         range = true,
         desc = "Investigate Git history of selected code block by visually selecting lines. git log -L<start_line>:<end_line>",
     })

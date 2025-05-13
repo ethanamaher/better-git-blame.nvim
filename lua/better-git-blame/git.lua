@@ -55,14 +55,14 @@ function M.parse_git_log(output_lines)
                 date = date,
                 time = time,
                 author = author,
-                message = message,
+                message = message, -- commit message (denoted subject from git log)
             })
         end
     end
     return commits
 end
 
--- driver function for BlameInvestigate
+-- driver function for BlameInvestigateLines
 -- git log -L<start>:<end>
 -- output of git log is parsed into commit_list table and returned
 function M.get_commits_by_line(selection, repo_root, callback)
@@ -151,7 +151,11 @@ function M.get_commits_by_search_term(selection, repo_root, search_term, callbac
     }):start()
 end
 
+-- driver function for BlameInvestigateFunction
+-- git log -L:<func_name>:<filename>
+-- output of git log is parsed into commit_list table and returned
 function M.get_commits_by_func_name(selection, repo_root, function_names, callback)
+    -- relative file path for git log arg
     local current_path = Path:new(selection.file)
     local rel_file_path = current_path:make_relative(repo_root)
     if not rel_file_path then
@@ -179,7 +183,7 @@ function M.get_commits_by_func_name(selection, repo_root, function_names, callba
                     return
                 end
 
-                local commit_list = M.parse_git_log(j:result())
+                local commit_list = M.parse_git_log(j:result()) -- should never be nil
                 -- no commit list
                 if #commit_list == 0 then
                     vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
@@ -200,6 +204,7 @@ function M.get_commit_details(repo_root, commit_hash, callback)
     local error_output = {}
     local exit_code = -1
 
+    -- git show <hash>
     Job:new({
         command = "git",
         args = diff_args,
@@ -218,7 +223,7 @@ function M.get_commit_details(repo_root, commit_hash, callback)
     }):start()
 end
 
-function M.get_git_remote_url(repo_root)
+local function get_git_remote_url(repo_root)
     local args = { "git", "-C", repo_root,  "remote", "get-url", "origin" }
     local result = vim.fn.systemlist(args)
     if result then
@@ -230,7 +235,7 @@ end
 
 -- parse a remote url from get_git_remote_url
 -- should work for both ssh and https urls
-function M.parse_git_url(url)
+local function parse_git_url(url)
     -- try ssh format
     local ssh_host, ssh_path = url:match("^git@([^:]+):(.+)$")
     if ssh_host and ssh_path then
@@ -253,13 +258,13 @@ function M.parse_git_url(url)
 end
 
 function M.open_commit_in_browser(repo_root, commit_hash)
-    local remote_url = M.get_git_remote_url(repo_root)
+    local remote_url = get_git_remote_url(repo_root)
     if not remote_url then
         vim.notify("Could not determine remote URL: ", vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
         return
     end
 
-    local parsed_url = M.parse_git_url(remote_url)
+    local parsed_url = parse_git_url(remote_url)
     if not parsed_url then
         vim.notify("Could not parse remote URL: " .. parsed_url, vim.log.levels.WARN, { title="BetterGitBlame:OpenCommitInBrowser" })
         return

@@ -9,6 +9,8 @@ local ts_query = require("vim.treesitter.query")
 local function escape_posix_ere(text)
     if not text then return "" end
 
+    -- escape posix and regex sequences for parsing line into regex
+    -- git grep can read
     text = text:gsub("\\", "\\\\")
     text = text:gsub("%^", "\\^")
     text = text:gsub("%$", "\\$")
@@ -118,7 +120,7 @@ function M.get_function_names_from_selection(start_line, end_line)
     local name_set = {}
 
     for id, node, metadata in query:iter_captures(root, bufnr, target_start_line, target_end_line) do
-        -- id and metadata unused for now, but they exist
+        -- id and metadata unused for now, but they are options for later maybe
         local name = vim.treesitter.get_node_text(node, 0)
         if not name_set[name] then
             table.insert(names, name)
