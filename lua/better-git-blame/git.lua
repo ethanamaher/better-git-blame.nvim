@@ -78,7 +78,6 @@ function M.get_commits_by_line(selection, repo_root, callback)
 
     -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
     local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
-    vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
 
     Job:new({
         command = "git",
@@ -163,12 +162,16 @@ function M.get_commits_by_func_name(selection, repo_root, function_names, callba
         return
     end
 
+    local commit_list = {}
+    local commit_list_set = {}
+
     for _, function_name in ipairs(function_names) do
         local range_arg = "-L:" .. function_name .. ":" .. rel_file_path
 
         -- git log -C <repo_root> -L "<start>,<end>:<relative_path>" --format="%H %ad %an %s" --date=short
         local git_args = { "-C", repo_root, "log", range_arg, format_arg, date_arg }
         vim.notify("Searching Git history for selection...", vim.log.levels.INFO, { title="BetterGitBlame" })
+
 
         Job:new({
             command = "git",
@@ -183,12 +186,22 @@ function M.get_commits_by_func_name(selection, repo_root, function_names, callba
                     return
                 end
 
-                local commit_list = M.parse_git_log(j:result()) -- should never be nil
+                local commit_list_function = M.parse_git_log(j:result()) -- should never be nil
+                for _, commit in ipairs(commit_list_function) do
+                    if not commit_list_set[commit.hash] then
+                        table.insert(commit_list, commit)
+                        commit_list_set[commit.hash] = true
+                    else
+                        vim.notify("Not insert hash: " .. commit.hash, vim.log.levels.INFO, { title="BetterGirBlame:BlameInvestigateFunction" })
+                    end
+                end
+
                 -- no commit list
-                if #commit_list == 0 then
+                if #commit_list_function == 0 then
                     vim.notify("No commits", vim.log.levels.WARN, { title="BetterGitBlame" })
                     -- callback with empty list
                 end
+
                 callback(commit_list, nil)
             end),
         }):start()
