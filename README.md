@@ -6,17 +6,24 @@ the idea behind this plugin was to offer a better history of a specific block of
 open to ideas. may be possible to select git commits in the file that contain portions of selected text but that does complicate it
 
 ## Features
-* Analyze Git history (`git log -L`) for lines visually selected
+* Analyze Git history with `git log` for lines visually selected
 * Present relevant commits in telescope picker with preview showing changes
 * `<CR>` a commit to open a full diff view of the selected commit (vim-fugitive or diffview.nvim if available)
 ## Use
-### `:BlameInvestigate`
+### `:BlameInvestigateLines`
 * Visually select lines of code to search for git commits that have affected one or more of the selected line numbers
 * Heuristic as same code may not be on same lines as development progresses
+* `git log -L<start_line>:<end_line>`
 ### `:BlameInvestigateContent`
 * Visually select lines of code, the function will find the longest line in selection and run a posix-ere escape function to prepare it for a regex search with git log -G
 * Longest line of may not be code or unique so could get false positives
 * Would like to apply a fuzzy search which may allow searching with multiple lines
+* `git log -G <regex>`
+### `:BlameInvestigateFunction`
+* Visually select lines of code, if any function declaration is in the selection it will find relevant commits for those functions
+* Will not show all commits when function names change
+* Would like to do more with treesitter to find name of function selection is in rather than needing a function name in the selection
+* `git log -L:<func_name>:<filename>`
 ### `:BlameShowLast`
 * Running the investigate commands caches the information used so running `:BlameShowLast` will open a telescope picker using the same commit list that was found with the investigate command
 * Only stores last search
@@ -45,7 +52,7 @@ return {
 
     config = function()
         require("better-git-blame").setup({
-            -- calling setup alone will setup the BlameInvestigate, BlameInvestigateContent, and BlameShowLast commands
+            -- calling setup alone will setup the commands
         })
     end,
 }
