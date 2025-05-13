@@ -6,6 +6,16 @@ local Path = require("plenary.path")
 local ts_parsers = require("nvim-treesitter.parsers")
 local ts_query = require("vim.treesitter.query")
 
+local function_node_types = {
+    ["function_declaration"] = true,
+    ["function_definition_statement"] = true,
+}
+
+local function is_function_declaration_node(node)
+    if not node then return false end
+    return function_node_types[node:type()]
+end
+
 local function escape_posix_ere(text)
     if not text then return "" end
 
@@ -115,6 +125,25 @@ function M.get_function_names_from_selection(start_line, end_line)
     ]]
 
     local query = ts_query.parse(vim.bo.filetype, query_str)
+
+    local current_node = root:descendant_for_range(target_start_line, target_end_line, target_start_line, target_end_line)
+
+    if not current_node then
+        print("Could not find node at selection start.")
+        return nil, nil
+    end
+
+    -- getting parent function_declaration from selection text
+    while current_node do
+        if is_function_declaration_node(current_node) then
+            local body_start_line, _, body_end_line, _ = current_node:range()
+
+            if body_start_line < target_start_line then target_start_line = body_start_line end
+            -- dont really need to update end
+            if body_end_line > target_end_line then target_end_line = body_end_line end
+        end
+        current_node = current_node:parent()
+    end
 
     local names = {}
     local name_set = {}
