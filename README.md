@@ -35,12 +35,11 @@ return {
     "ethanamaher/better-git-blame.nvim",
 
     dependencies = {
-        "nvim-lua-plenary/nvim",
+        "nvim-lua/plenary.nvim",
         "nvim-telescope/telescope.nvim",
         -- Optional but highly recommended
         -- "tpope/vim-fugitive"
         -- "sindrets/diffview.nvim"
-
     },
 
     config = function()
